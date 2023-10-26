@@ -125,8 +125,47 @@ class XXXXWidgets extends StatelessWidget{
 }
 ```
 
+**Option for multiple variables**
+
+Use a class to centralize the variables and logics.
+It's called `State` in the provider and it should be immutable.
+To build the immutable class, [built_value](https://pub.dev/packages/built_value) is one of the options.
+
+```dart
+// use built_value to build the immutable class
+abstract class MulItemsState implements Built<MulItemsState, MulItemsStateBuilder> {
+  MulItemsState._();
+
+  factory MulItemsState([Function(MulItemsStateBuilder b) updates]) = _$MulItemsState;
+
+  bool get isPasswordHidden;
+  bool get isConfirmedPasswordHidden;
+
+  factory MulItemsState.initValue() => _$MulItemsState._(
+    isPasswordHidden: true,
+    isConfirmedPasswordHidden: false,
+  );
+}
+
+@riverpod
+class MulItems extends _$MulItems {
+  @override
+  MulItemsState build() => MulItemsState.initValue();
+
+  void togglePassword()  {
+    state = state.rebuild((s) => s.isPasswordHidden = !s.isPasswordHidden );
+  }
+  void toggleConfirmedPassword()  {
+    state = state.rebuild((s) => s.isConfirmedPasswordHidden = !s.isConfirmedPasswordHidden );
+  }
+}
+```
+
 *To be continued*
 
 
+## Updates
+Created on 2023-10-24
 
+Updates on 2023-10-26: add multiple variables case
 
