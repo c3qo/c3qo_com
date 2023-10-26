@@ -1,0 +1,132 @@
+---
+title: Migrate from Getx to Riverpod/GoRouter/Others in Flutter
+description: Migrate the state management/router framework away from Getx incrementally
+sidebar:
+    label: Flutter:From Getx to Riverpod/GoRouter/Others
+---
+
+## Background
+[Getx](https://pub.dev/packages/get) is a good Flutter framework to resolve the different kinds of pain points,
+It's a beginner-friendly framework, so beginners are more like coding on "Getx" instead of "Flutter".
+
+3 years ago, I jumped into Flutter for a toy-project as a backend developer and was surprised by the Getx, so simple and easy to understand/use.
+I migrated that toy-project from the Flutter built-in state management/router to Getx.
+
+Now, I'm creating a new toy-project and the initial version is almost done, still based on Getx.
+
+Before moving it to Beta testing, I'm facing the challenges:
+
+...
+
+I should not complain about Getx as that's an opensource lib with MIT License and I contributed nothing.
+
+[Riverpod](https://pub.dev/packages/riverpod) is a new ~~**beginner-killer**~~ lib to manage the state and dependencies.
+[go_router](https://pub.dev/packages/go_router), an official lib for router navigation.
+
+As a beginner, I'll use this article to note my migration progress.
+
+Also, feel free to point out my misunderstanding or mistakes, or if you have any new cases to enhance the list.
+
+Below cases are based on this baseline implicitly:
+```
+  riverpod: ^2.4.4
+  flutter_riverpod: ^2.4.4
+  riverpod_annotation: ^2.2.1
+  riverpod_generator: 3.0.0-dev.3
+  riverpod_lint: ^2.3.1
+```
+
+## Principle
+1. Change the code page by page and the app should be runnable, always.
+2. Not rewrite all of them or recreated a new one.
+
+
+## Case by case
+
+### Main entry
+the `ProviderScope` (from Riverpod for initialization) and `GetMaterialApp` (from Getx for initialization) can work together.
+
+so putting them together will make the app runnable during the migration.
+```dart
+
+    runApp(
+      ProviderScope(
+        child: GetMaterialApp(
+          ...
+        ),
+      ),
+    );
+```
+
+### Rx variables and Obx
+
+Use `NotifierProvider` to replace the `Rx` variables,
+use `ref.watch` to replace the `Obx` reactive widget.
+
+**Before:**
+```dart
+class XXXXController extends GetxController{
+  final RxBool _isPasswdHidden = true.obs;
+  bool get isPasswdHidden => _isPasswdHidden.value;
+  void toggle() => _isPasswdHidden.value = !_isPasswdHidden.value;
+}
+
+class XXXXWidgets extends StatelessWidget{
+  XXXXController c = Get.find();
+
+  get passwordTextField => Obx(() => TextFormField(
+        obscureText: c.isPasswdHidden,
+        decoration: InputDecoration(
+          suffixIcon: IconButton(
+            icon: Icon(
+              c.isPasswdHidden
+                  ? Icons.visibility
+                  : Icons.visibility_off,
+            ),
+            onPressed: c.toggle,
+          ),
+          hintText: 'Password',
+        ),
+  ));
+}
+```
+
+**After:**
+```dart
+@riverpod
+class IsPasswordHidden extends _$IsPasswordHidden {
+  @override
+  bool build() => true; // same to the `true.obs` initialization
+
+  void toggle()  {
+    state = !state;
+  }
+}
+
+// extending `ConsumerWidget` also works as long as the `ref` is able to refer
+class XXXXWidgets extends StatelessWidget{
+  get passwordTextField => Consumer(
+      builder: (context, ref, child) => TextFormField(
+        // use `ref.watch` to react the change
+        obscureText: ref.watch(isPasswordHiddenProvider),
+        decoration: InputDecoration(
+          suffixIcon: IconButton(
+            icon: Icon(
+              !ref.watch(isPasswordHiddenProvider)
+                  ? Icons.visibility
+                  : Icons.visibility_off,
+            ),
+            // use `ref.read` in event function
+            onPressed: ref.read(isPasswordHiddenProvider.notifier).toggle
+          ),
+          hintText: 'Password',
+        ),
+  ));
+}
+```
+
+*To be continued*
+
+
+
+
