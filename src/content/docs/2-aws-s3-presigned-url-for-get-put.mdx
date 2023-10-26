@@ -1,0 +1,141 @@
+---
+title: S3 pre-signed URL with FirebaseAuth in Flutter
+description:  Use S3 pre-signed Url to upload and download objects in Flutter working with Firebase Auth
+sidebar:
+    label: Flutter:Pre-signed S3 Url with Firebase Auth
+---
+import { Image } from "astro:assets";
+import img21 from '../../assets/2/2-1.jpg';
+import img22 from '../../assets/2/2-2.jpg';
+import img23 from '../../assets/2/2-3.jpg';
+import img24 from '../../assets/2/2-4.jpg';
+
+## System Design Principle
+The design decision is made based on below:
+1. Security: Protect user's data, also protect my infrastructures
+2. Cost: As cheap as possible during the startup phase.
+
+## Use case
+Attaching an image in a mobile app is a very common use case, for example, the user profile image, the item's image, or a meme image.
+I will focus on the writing (or put, or upload) case. For reading, we also can use pre-signed url, or make the s3 bucket as public, or other options. I may cover it in other articles.
+
+AWS S3 might be the first choice as the image storage. It supports the pre-signed URL, this URL can grant the temporary permission to access (read/write) the file temporarily without exposing the aws access key pair to clients.
+
+## What we have (or limitation)
+1. AWS S3 : support pre-signed url.
+2. Firebase AuthN : Manage the user authentication, other authN solution also works as long as it supports JWT.
+3. Backend service: (AWS ApiGateway + Lambda or others, doesn't matter in this article)
+4. JWT: the backend service can use it to verify the user's authentication with Firebase AuthN
+5. Flutter: No official S3 SDK for Flutter(or Dart) AFAIK (searched), `amplify_storage_s3` is the only (right?) official SDK from AWS however it works for Amplify (wrapper of a few AWS services including S3) based on S3, not S3's SDK. (pay extra to Amplify service).
+
+**Remember the limitation that Flutter doesn't have the official S3 SDK.**
+
+## Options
+the user has signed in the app, and want to upload an image.
+
+We may have below options:
+1. The backend service provides an upload api. The app can call the api to upload image, then the service talks to S3 for saving the image.
+<Image src={img21} alt="2-1 diagram"/>
+2. The backend service provides an api to return the pre-signed s3 url to the app, the app uses the url to read/write image from/to s3.
+<Image src={img22} alt="2-2 diagram"/>
+3. Copy the AWS IAM User access key pair into the app (using env to import or hardcode), then generate the pre-signed url on the client side.
+<Image src={img23} alt="2-3 diagram"/>
+4. Call AWS IAM role to get the temporary access key without talking to the backend service. Generate the pre-signed url on the client side, then use the url to `Put` object.
+<Image src={img24} alt="2-4 diagram"/>
+## Making the decision
+
+First, option 3 is not recommended and should be excluded. Building the IAM User (long term credential) into the app or commit it into code repository (even private repository) may expose it to the public. It's not safe totally. The hacker can use the credentials to upload the unlimited image even without signing up to the mobile app.
+
+#### Option 1 Upload Image APi
+**Pros**
+1. High security level.
+2. Can be asynchronous.
+3. Error handling in service, good customer exp.
+4. Can identify customer's bad behavior quickly or build rule.
+
+**Cons**
+1. Cost is high
+   - Ingress bandwidth cost
+   - Request cost
+
+#### Option 2 Pre-signed Url API
+**Pros**
+1. Medium security level.
+2. Can adjust the Url config per customer and control the s3 path
+    - the TTL
+    - the image name, s3 path
+
+**Cons**
+1. Cost is high.
+    - Request cost
+2. Error handing in the app.
+
+#### Option 4 Generate Pre-signed Url in the app
+**Pros**
+1. Low security level.
+2. Cost is low.
+    - call AWS STS assume role api is free
+
+**Cons**
+1. Error handing in the app.
+2. the short term credential is exposed to client.
+3. client control the image name, s3 path.
+
+#### Decision
+I choose option 4 as the low cost and the security can meet the industry standard.
+
+:::note
+For the security level, I use `Low` or `Medium`, it only means the relative security level, it still meets the industry standard.
+:::
+
+**Worst cases**
+1. the pre-signed url is exposed to a hacker: the hacker can use this url to upload unlimited images to the same s3 path (pre-defined in the url) until the url gets expiration.
+2. the short term credential is exposed to a hacker: the hacker can use the credential to generate pre-signed url with random s3 path and upload them, until the short term credential gets expiration.
+
+**Mitigation**
+1. Reduce the TTL on the pre-signed url.
+2. Reduce the TTL on the short term credential.
+3. Grant the minimal permission to the IAM Role (with the short term credential), like only can write object to specific s3 bucket or path.
+4. Associate the user's identity to the short term credential, so it's possible to audit the log in AWS CloudTrail (find who is doing the bad behavior). Check the full code in gist
+```dart
+    Map<String, dynamic> query = {
+   'Version': '2011-06-15',
+   'DurationSeconds': '3600',
+   'Action': 'AssumeRoleWithWebIdentity',
+   'RoleArn': stsAssumeRoleArn,
+   'RoleSessionName': user!.email, // <-- Associate the user's identity to the short term credential request
+   'WebIdentityToken': token
+};
+```
+
+## Alternative
+
+For option 3 and 4, we also can use S3 Rest api `PutObject` instead of the pre-signed url. We have to deal with the little complex http headers (almost same to the pre-signed url).
+We prefer to pre-signed url because [aws_signature_v4](https://pub.dev/packages/aws_signature_v4) is available, it's the official SDK from AWS (by Amplify).
+
+## Implementation
+
+### Infra
+
+AWS ApiGateway and AWS IAM Assume Role both support the JWT (part of the OpenIdConnect and OAuth) so it requires some works to set up the infra.
+1. AWS ApiGateway guidance: https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-jwt-authorizer.html
+2. AWS IAM guidance: https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_oidc_manual.html
+3. the configuration from Firebase AuthN to set up in AWS: https://firebase.google.com/docs/auth/admin/verify-id-tokens#verify_id_tokens_using_a_third-party_jwt_library
+
+### Code
+
+main libraries:
+1. [aws_signature_v4](https://pub.dev/packages/aws_signature_v4)
+2. [aws_common](https://pub.dev/packages/aws_common)
+
+code gist:
+
+https://gist.github.com/c3qo/c59e942e48229d6f5e1ce4a2c84a8022
+
+## Fun facts
+
+1. ChatGPT 3.5 can generate the workable code (not verified on device 😜 ).
+2. For image storage solution, I migrated to other Iaas after the beta testing, not using S3.
+
+## Updates
+Created on 2023-10-09

@@ -4,6 +4,7 @@ import tailwind from '@astrojs/tailwind';
 
 // https://astro.build/config
 export default defineConfig({
+	site: 'https://c3qo.com',
 	integrations: [
 		starlight({
 			title: 'c3qo - a cloud',
@@ -11,22 +12,21 @@ export default defineConfig({
 				github: 'https://github.com/c3qo',
 			},
 			favicon: '/src/assets/c3qo.svg',
+			components: {
+				Footer: './src/overrides/Footer.astro',
+			},
 			sidebar: [
 				{
-					label: 'Introduction',
-					autogenerate: { directory: 'introduction' },
+					label: 'Start Here',
+					items: [
+						{ label: 'Intro', link: '/1-getting-started' },
+					],
 				},
 				{
-					label: 'As a whole',
-					autogenerate: { directory: 'whole' },
-				},
-				{
-					label: 'Flutter',
-					autogenerate: { directory: 'flutter' },
-				},
-				{
-					label: 'AWS',
-					autogenerate: { directory: 'aws' },
+					label: 'Inbox - Uncategorized',
+					items: [
+						{  label: 'Flutter: Pre-signed S3 Url with Firebase Auth', link: '/2-aws-s3-presigned-url-for-get-put' },
+					],
 				},
 			],
 			customCss: ['./src/tailwind.css', './src/styles/custom.css'],
