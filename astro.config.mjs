@@ -1,11 +1,13 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import tailwind from '@astrojs/tailwind';
+import sitemap from "@astrojs/sitemap";
 
 // https://astro.build/config
 export default defineConfig({
 	site: 'https://c3qo.com',
 	integrations: [
+		sitemap(),
 		starlight({
 			title: 'c3qo - a cloud',
 			social: {
