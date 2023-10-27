@@ -160,6 +160,57 @@ class MulItems extends _$MulItems {
   }
 }
 ```
+### Service (long run instance)
+
+Usually `GetxService` is used to define a long run instance.
+This instance may be shared by multiple pages, we can add a few lines to generate a long run riverpod provider.
+This provider will be used in the migration for riverpod, and existing code base can still work with `GetxService`.
+
+**Before:**
+```dart
+class AuthService extends GetxService {
+  Future<void> logout() async {
+    await _auth.signOut();
+  }
+}
+
+class AuthPage extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () async => await Get.find<AuthService>().logout(),
+      ...
+    );
+  }
+
+}
+```
+**After:**
+
+```dart
+// used for Riverpod
+@Riverpod(keepAlive: true)
+AuthService authService(AuthServiceRef ref) {
+  return AuthService();
+}
+
+// used for Getx, keep it if other pages are using it
+class AuthService extends GetxService {
+  Future<void> logout() async {
+    await _auth.signOut();
+  }
+}
+
+class AuthPage extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, ref) {
+    return GestureDetector(
+      onTap: () async => await ref.read(authServiceProvider).logout(),
+      ...
+    );
+  }
+}
+```
 
 *To be continued*
 
@@ -168,4 +219,6 @@ class MulItems extends _$MulItems {
 Created on 2023-10-24
 
 Updates on 2023-10-26: add multiple variables case
+
+Updates on 2023-10-26: add getxservice case
 
