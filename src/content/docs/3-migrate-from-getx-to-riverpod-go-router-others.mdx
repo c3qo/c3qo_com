@@ -64,6 +64,7 @@ Use `NotifierProvider` to replace the `Rx` variables,
 use `ref.watch` to replace the `Obx` reactive widget.
 
 **Before:**
+
 ```dart
 class XXXXController extends GetxController{
   final RxBool _isPasswdHidden = true.obs;
@@ -92,6 +93,7 @@ class XXXXWidgets extends StatelessWidget{
 ```
 
 **After:**
+
 ```dart
 @riverpod
 class IsPasswordHidden extends _$IsPasswordHidden {
@@ -124,6 +126,7 @@ class XXXXWidgets extends StatelessWidget{
   ));
 }
 ```
+If use `flutter_hooks` with riverpod, the code can be simplified more.
 
 **Option for multiple variables**
 
@@ -212,6 +215,95 @@ class AuthPage extends ConsumerWidget {
 }
 ```
 
+### Class structure
+**Before:**
+
+the getx controller can be referred as class attribute.
+to avoid too many nested widgets in the `build` method,
+I normally use `getter` to build small widgets and then combine them in the `build`.
+
+```dart
+class XXXXWidgets extends StatelessWidget{
+  XXXXController c = Get.find();
+
+  get passwordTextField => Obx(() => TextFormField(
+    // access controller
+  ));
+  get usernameTextField => Obx(() => TextFormField(...));
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+       usernameTextField,
+       passwordTextField,
+      ]
+    );
+  }
+}
+```
+
+**After:**
+#### 1.Wrap within Consumer
+In riverpod, the `ref` (WidgetRef) is not available as class attribute, an alternative option is to wrap the widget within `Consumer`.
+However, if you have too many widgets, you have to wrap all of them.
+```dart
+
+class XXXXWidgets extends StatelessWidget{
+
+  get passwordTextField => Consumer(
+    builder: (context, ref, child) => TextFormField(
+      //access ref
+    )
+  );
+  get usernameTextField => Consumer(
+    builder: (context, ref, child) => TextFormField(...)
+  );
+
+  @override
+  Widget build(BuildContext context, ref) {
+    // ref is not used by those small widgets
+    return Row(
+      children: [
+       usernameTextField,
+       passwordTextField,
+      ]
+    );
+  }
+}
+```
+
+#### 2.Nested functions
+Dart allows you to define functions inside other functions, the inner (nested) function is private to its outer function.
+
+The nested function can [access the variables](https://dart.dev/language/functions#lexical-scope) at the outer function.
+
+```dart
+class XXXXWidgets extends StatelessWidget{
+  @override
+  Widget build(BuildContext context, ref) {
+
+    // not a getter anymore
+    passwordTextField() => TextFormField(
+      // access ref
+    );
+    usernameTextField() => TextFormField(...);
+
+    return Row(
+      children: [
+       usernameTextField(), // call function
+       passwordTextField(),
+      ]
+    );
+  }
+}
+```
+
+Wrapping `Consumer` as `getter` is used in `abstract` class/widget and children class/widget can share the same widget.
+For example, the `passwordTextField` can be defined in an `abstract` widget, the children widget `Login` and `Signup` widget can use it.
+
+Nested functions can only be accessed by outer function, can't be shared to children classes.
+
 *To be continued*
 
 
@@ -222,3 +314,4 @@ Updates on 2023-10-26: add multiple variables case
 
 Updates on 2023-10-26: add getxservice case
 
+Updates on 2023-12-03: add class structure
