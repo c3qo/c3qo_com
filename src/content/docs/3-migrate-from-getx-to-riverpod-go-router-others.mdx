@@ -304,6 +304,68 @@ For example, the `passwordTextField` can be defined in an `abstract` widget, the
 
 Nested functions can only be accessed by outer function, can't be shared to children classes.
 
+### Async loading
+Normally, I use `getx` to read the data asynchronously with job_done flag. The flag is a `Rx` variable, it can update the widget tree.
+
+(this may not be the best practise, feel free to tell me the best way to use `getx` for async reading)
+
+```dart
+class XXXXController extends GetxController{
+  final RxBool _loadingDone = false.obs;
+  bool get loadingDone => _loadingDone.value;
+  late AccountInfo info;
+
+  final UserInfoService service = Get.find();
+
+  @override
+  void onInit() {
+    super.onInit();
+    loadData();
+  }
+
+  Future<void> loadData() async {
+    _loadingDone.value = false;
+    info = await service.getAccount();
+    _loadingDone.value = true;
+  }
+}
+
+class XXXXWidgets extends StatelessWidget{
+  XXXXController c = Get.find();
+
+  get accountNameText => Obx(() => Visibility(
+      visible: c.loadingDone,
+      replacement: const Center(child: CircularProgressIndicator()),
+      child: Text(c.info.name)));
+}
+```
+
+In `riverpod`, we can rely on `AsyncValue` with `watch` method to rewrite above case.
+
+```dart
+
+@riverpod
+FutureOr<AccountInfo> accountInfo(AccountInfoRef ref) async {
+  return await ref.watch(userInfoServiceProvider).getAccount();
+}
+
+class XXXXWidgets extends ConsumerWidget{
+  @override
+  Widget build(BuildContext context, ref) {
+    final AsyncValue<AccountInfo> accountInfo = ref.watch(accountInfoProvider);
+
+    accountNameText() => accountInfo.when(
+      error: (e, __) => Center(child: Text('Error: ${e.toString()}')),
+      loading: () => const Center(child: CircularProgressIndicator()),
+      data: (info) => Text(info.name),
+    );
+  }
+}
+```
+
+also can use `switch` instead of `when` on `AsyncValue`, like [this example](https://riverpod.dev/docs/essentials/websockets_sync#listening-to-a-stream) from the official doc.
+
+
 *To be continued*
 
 
@@ -315,3 +377,5 @@ Updates on 2023-10-26: add multiple variables case
 Updates on 2023-10-26: add getxservice case
 
 Updates on 2023-12-03: add class structure
+
+Updates on 2023-12-05: add async loading case
