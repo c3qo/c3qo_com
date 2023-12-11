@@ -1,0 +1,150 @@
+---
+title: Migrate from Getx to Riverpod/GoRouter/Others in Flutter (Part 2)
+description: Migrate the state management/router framework away from Getx incrementally
+sidebar:
+    label: Flutter:From Getx to Riverpod/GoRouter/Others (2)
+---
+
+## Background
+Read the [Part 1](/3-migrate-from-getx-to-riverpod-go-router-others/) for migrating state management functions from Getx to Riverpod.
+
+This part will cover the route cases and other small cases.
+
+Below route cases are based on this baseline implicitly:
+```
+  go_router: ^12.1.3
+```
+
+## Router
+
+### Global Routes
+**Before**
+
+```dart
+  routes = [
+    GetPage(
+      name: '/home',
+      page: () => const HomeView(),
+    ),
+    ...
+  ];
+
+  GetMaterialApp(
+      getPages: routes,
+      initialRoute: '/home',
+      defaultTransition: Transition.rightToLeft,
+      navigatorKey: _navigatorKey,
+      navigatorObservers: <NavigatorObserver>[
+        AnalyticsService.observer,
+      ],
+      ...
+    );
+```
+
+**After**
+
+Using `riverpod` provider for router because I have the case to navigate the page from the Controller layer.
+`GoRouter` supports two methods for navigation api. One is to use the `context` (`BuildContext`), like `context.go('/home')`, `context` is available in UI Widget.
+Another one is to use the same [apis](https://pub.dev/documentation/go_router/latest/go_router/GoRouter-class.html#instance-methods) on `GoRouter` class without `context`.
+
+```dart
+  routes = [
+    GoRoute(
+      path: '/home',
+      builder: (_, __) => const HomeView(),
+    ),
+    ...
+  ];
+
+  @Riverpod(keepAlive: true)
+  GoRouter appRouter(AppRouterRef ref) {
+    return GoRouter(
+      initialLocation: '/home',
+      routes: routes,
+      debugLogDiagnostics: true,
+      navigatorKey: _navigatorKey,
+      observers: <NavigatorObserver>[
+        AnalyticsService.observer,
+      ],
+    );
+  }
+
+  // to use riverpod provider, the App widget should extend from `ConsumerWidget`
+  MaterialApp.router(
+      routerConfig: ref.watch(appRouterProvider),
+      ...
+    );
+```
+
+### Navigation
+`ref.watch(appRouterProvider)` is good to use in controller if context is not available, like `ref.watch(appRouterProvider).pop()`.
+
+* `Get.back()` to `context.pop()`
+* `Get.back(result: 'done')` to `context.pop('done')`
+* `Get.toNamed('/home')` to `context.push('/home')`
+* `Get.to(const HomeView())`: seems GoRouter doesn't support such navigation, have to register it to routes first then use `push`.
+* `Get.offAllNamed('/home')'` to `context.go('/home')`
+
+#### Arguments in navigation
+
+Pass the arg to next page:
+* `Get.toNamed('/home', arguments: 'abc')` to `context.push('/home', extra: 'abc')`
+
+Get the arg in route for next page:
+```dart
+ GoRoute(
+      path: '/home',
+      builder: (_, state) => HomeView(state.extra as String),
+    ),
+```
+`Get.arguments` in Getx can be accessed in widgets and controllers without `context`. To access the `extra` arg in controller (or provider) in riverpod, the arg should be passed:
+```dart
+@riverpod
+class HomeController extends _$HomeController {
+  HomeState build(String args) {
+    // args is 'abc'
+    ...
+  }
+  ...
+}
+
+class HomeView extends ConsumerWidget {
+  const HomeView(this.args, {super.key});
+
+  @override
+  Widget build(BuildContext context, ref) {
+    final homeState = ref.watch(homeControllerProvider(args));
+    final homeController = ref.watch(homeControllerProvider(args).notifier);
+    ...
+  }
+}
+```
+
+
+### Nested Routes
+I didn't get the way to use `GoRouter` for nested routes 😅. so migrate it from Getx to the flutter built-in Navigator. The [official](https://docs.flutter.dev/cookbook/effects/nested-nav#generate-nested-routes) doc is a good example.
+
+**Only call out**: Don't use `GoRouter` api to navigate the `Navigator`'s route.
+
+## Other cases
+
+`Get.width` and `Get.height` can be replaced by
+
+```dart
+  final FlutterView _view = WidgetsBinding.instance.platformDispatcher.views.first;
+
+  double get width => _view.physicalSize.width / _view.devicePixelRatio;
+
+  double get height => _view.physicalSize.height / _view.devicePixelRatio;
+```
+
+For `Get.context`, this can be replaced by the real `context` if the widget is migrated to riverpod on part1.
+An alternative to get the `context` outside widgets, make it globally:
+```dart
+  final navigatorKey = GlobalKey<NavigatorState>();
+
+  BuildContext get currentContext => navigatorKey.currentContext!;
+```
+
+## Updates
+Created on 2023-12-10

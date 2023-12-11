@@ -2,7 +2,7 @@
 title: Migrate from Getx to Riverpod/GoRouter/Others in Flutter
 description: Migrate the state management/router framework away from Getx incrementally
 sidebar:
-    label: Flutter:From Getx to Riverpod/GoRouter/Others
+    label: Flutter:From Getx to Riverpod/GoRouter/Others (1)
 ---
 
 ## Background
@@ -18,12 +18,10 @@ Before moving it to Beta testing, I'm facing the challenges:
 
 ...
 
-I should not complain about Getx as that's an opensource lib with MIT License and I contributed nothing.
-
 [Riverpod](https://pub.dev/packages/riverpod) is a new ~~**beginner-killer**~~ lib to manage the state and dependencies.
 [go_router](https://pub.dev/packages/go_router), an official lib for router navigation.
 
-As a beginner, I'll use this article to note my migration progress.
+As a beginner, I'll use this article to note my migration progress, it may not cover all Getx use cases.
 
 Also, feel free to point out my misunderstanding or mistakes, or if you have any new cases to enhance the list.
 
@@ -39,7 +37,6 @@ Below cases are based on this baseline implicitly:
 ## Principle
 1. Change the code page by page and the app should be runnable, always.
 2. Not rewrite all of them or recreated a new one.
-
 
 ## Case by case
 
@@ -218,7 +215,7 @@ class AuthPage extends ConsumerWidget {
 ### Class structure
 **Before:**
 
-the getx controller can be referred as class attribute.
+the Getx controller can be referred as class attribute.
 to avoid too many nested widgets in the `build` method,
 I normally use `getter` to build small widgets and then combine them in the `build`.
 
@@ -305,9 +302,9 @@ For example, the `passwordTextField` can be defined in an `abstract` widget, the
 Nested functions can only be accessed by outer function, can't be shared to children classes.
 
 ### Async loading
-Normally, I use `getx` to read the data asynchronously with job_done flag. The flag is a `Rx` variable, it can update the widget tree.
+Normally, I use Getx to read the data asynchronously with job_done flag. The flag is a `Rx` variable, it can update the widget tree.
 
-(this may not be the best practise, feel free to tell me the best way to use `getx` for async reading)
+(this may not be the best practise, feel free to tell me the best way to use Getx for async reading)
 
 ```dart
 class XXXXController extends GetxController{
