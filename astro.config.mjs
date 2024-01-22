@@ -30,6 +30,7 @@ export default defineConfig({
 						{  label: 'Flutter: Pre-signed S3 Url with Firebase Auth', link: '/2-aws-s3-presigned-url-for-get-put' },
 						{  label: 'Flutter: From Getx to Riverpod/GoRouter/Others', link: '/3-migrate-from-getx-to-riverpod-go-router-others' },
 						{  label: 'Flutter: From Getx to Riverpod/GoRouter/Others(2)', link: '/4-migrate-from-getx-to-riverpod-go-router-others-2' },
+						{  label: 'AWS: AWS Lambda in ipv6 VPC using CDK', link: '/5-aws-lambda-on-ipv6-without-nat' },
 					],
 				},
 			],

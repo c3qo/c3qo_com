@@ -1,0 +1,172 @@
+---
+title: Set up IPv6 VPC for Lambda to access public internet without NATGateway and public IPv4 address
+description: Build Lambda into IPv6 VPC using CDK to avoid the charge on NAT or on public IPv4
+sidebar:
+    label: AWS:AWS Lambda in IPv6 VPC using CDK
+---
+import { Image } from "astro:assets";
+import img51 from '../../assets/5/5-1.png';
+import img52 from '../../assets/5/5-2.jpg';
+
+## Background
+I created an AWS Lambda behind the AWS ApiGateway, it also connects an RDS instance which is placed in a private subnet.
+The Lambda needs to call an external server ([AppStore Server](#fun-fact)).
+I followed some docs and created an NATGateway for testing, until I saw the charge of the NATGateway on the AWS bill in a few days.
+
+## Options
+After digging into the case in these days, I have several potential ways to connect AWS Lambda to the public internet with charge or no charge at all.
+
+<Image src={img51} alt="5-1 diagram"/>
+
+About the NATGateway pricing and Public IPv4 pricing:
+* **NATGateway**: You have to pay at least ~$30/month even no data processing and transfer.
+* **Public IPv4 (including Elastic IPv4)**: New charge takes effect on February 1, 2024. $0.005/hour per 1 ip for in-use or idle.
+
+(Both of them are available on: https://aws.amazon.com/vpc/pricing/)
+
+## Decision
+
+### Based on the Principle
+1. Security: Protect user's data, also protect my infrastructures
+2. Cost: As cheap as possible during the startup phase.
+
+### Result
+Now I run the Lambda within a dual stack (both IPv4 and IPv6) VPC. The infra was built by CDK.
+Lambda is connecting to public internet with an IPv6 address and to the RDS in the private VPC. **No public IPv4 address at all**.
+
+## Implementation
+
+There are ton of the blogs/articles on the internet to show the process for setting up Lambda + NATGateway/NATInstance.
+So I won't copy them again.
+
+Next, I'll show how to set up the Lambda into a dual stack VPC including the RDS, with no public IPv4.
+
+### Overall Infrastructure
+<Image src={img52} alt="5-2 diagram"/>
+
+### Code
+
+All the Typescript code is based on the `"aws-cdk-lib": "^2.122.0",` (released on 2024-01-18, as of 2024-01-21). I read a bunch of the AwsCDK GitHub issues, they released
+a few change related to the IPv6 recently, so use the latest version.
+My understanding, even the latest CDK lib, not fully support the CDK L3 constructs/api, have to use the CloudFormation L1 constructs to enable the features.
+
+#### Create Network
+Have listed the network config on the Overall Infra diagram.
+
+Three types of the subnets:
+* `PRIVATE_WITH_EGRESS` or `Service` is a private subnet with an egress-only internet gateway (EIGW),
+can connect to the Internet, but will not allow connections to be initiated from the Internet.
+
+* `PRIVATE_ISOLATED` or `DB` is an absolutely private subnet, only can be accessed within VPC.
+
+* `PUBLIC` or `Public` can access the internet via internet gateway, I'll place an EC2 instance as bastion host later.
+
+The key points are explained in code.
+
+**Note:** you may see the examples to create route table for IPv6 on other articles. This is not needed as it is built into CDK for Dual-Stack-VPC in new release.
+```typescript
+    this.vpc = new Vpc(this, 'Vpc', {
+      ipProtocol: IpProtocol.DUAL_STACK, // Key point: Enable Dual stack
+      maxAzs: 2,
+      natGateways: 0, // Key point: No NATGateway will be created automatically.
+      subnetConfiguration: [
+        {
+          cidrMask: 24, // Key point: only used for IPv4
+          name: 'Service',
+          subnetType: SubnetType.PRIVATE_WITH_EGRESS, // Key point: Lambda need the 'egress'
+        },
+        {
+          cidrMask: 24,
+          name: 'DB',
+          subnetType: SubnetType.PRIVATE_ISOLATED,
+        },
+        {
+          name: 'Public',
+          subnetType: SubnetType.PUBLIC,
+          mapPublicIpOnLaunch: false,
+        },
+      ],
+    });
+    // Key point: create the cidr for IPv6,
+    // `amazonProvidedIpv6CidrBlock` would create a CIDR with a /56 prefix length for VPC
+    const ipv6cidr = new CfnVPCCidrBlock(this, 'CIDR6', {
+      vpcId: this.vpc.vpcId,
+      amazonProvidedIpv6CidrBlock: true,
+    });
+    const publicSubnetIds = this.vpc.publicSubnets.map((i) => i.subnetId);
+    this.vpc.publicSubnets
+      .concat(this.vpc.privateSubnets)
+      .concat(this.vpc.isolatedSubnets)
+      .forEach((subnet, index) => {
+        // don't miss this
+        subnet.node.addDependency(ipv6cidr);
+        // Key point: override the CIDR to a /64 prefix length
+        // must be /64 for subnet
+        const cfnSubnet = subnet.node.defaultChild as CfnSubnet;
+        cfnSubnet.ipv6CidrBlock = Fn.select(
+          index,
+          Fn.cidr(
+            Fn.select(0, this.vpc.vpcIpv6CidrBlocks),
+            256,
+            '64'
+          )
+        );
+        // this flag has been exposed to L3, only using it here works
+        cfnSubnet.assignIpv6AddressOnCreation = true;
+        // Key point: make `Public` subnet IPv6 only and remove IPv4 CIDR
+        // Can't apply this to `Service` and `DB` subnet because Lambda and RDS don't support IPv6-only subnet
+        if (publicSubnetIds.includes(subnet.subnetId)) {
+          cfnSubnet.ipv6Native = true;
+          cfnSubnet.cidrBlock = undefined;
+        }
+      });
+```
+
+#### Create Lambda
+Use the CloudFormation L1 constructs to enable the IPv6 flag.
+
+The Lambda function API for VpcConfig:
+https://docs.aws.amazon.com/lambda/latest/dg/API_VpcConfig.html#SSS-Type-VpcConfig-Ipv6AllowedForDualStack
+
+You also can find the IPv6 flag on Lambda console under "Configuration"->"VPC"->"Subnets"->"Allow IPv6 traffic"
+
+```typescript
+    const lambda = new Function(this, 'Handler', {
+      ...
+    });
+
+    const func = lambda.node.defaultChild as CfnFunction;
+    func.vpcConfig = {
+      // enable the flag
+      ipv6AllowedForDualStack: true,
+      // copy with the existing config created in "new Function"
+      securityGroupIds: (func.vpcConfig as CfnFunction.VpcConfigProperty)
+        .securityGroupIds,
+      subnetIds: (func.vpcConfig as CfnFunction.VpcConfigProperty).subnetIds,
+    };
+```
+
+#### Create RDS Instance
+Enable the dual network flag, easy change:
+
+```typescript
+      this.dbInstance = new rds.DatabaseInstance(this, 'RDS', {
+        ...
+      networkType: NetworkType.DUAL,
+    });
+```
+
+## Reference
+
+Enabling IPv6 on Resources and VPCs: https://github.com/aws/aws-cdk/issues/894
+
+## Fun Fact
+
+Right now, the Lambda can access the public internet with IPv6 address, however, I can't shoot the goal of calling AppStore Server from the Lambda.
+
+**Why?**
+
+Guess it :)
+
+## Updates
+Created on 2024-01-21
