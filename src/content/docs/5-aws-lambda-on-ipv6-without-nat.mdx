@@ -156,6 +156,24 @@ Enable the dual network flag, easy change:
     });
 ```
 
+#### Create Bastion Host
+Only AWS Nitro System is able to support ipv6-only subnet, so choose the correct instance.
+
+https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instance-types.html#ec2-nitro-instances
+
+The instance also can be used as a NATInstance which has the similar functions like NATGateway or Egress-Only-Internet Gateway.
+(A lot of articles to guide the setup for NATInstance)
+
+```typescript
+    const bastion = new ec2.Instance(this, `bastion`, {
+      vpc: props.vpc,
+      securityGroup: props.publicSecurityGroup,
+      vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
+      instanceType: ec2.InstanceType.of(...), // choose an instance which can support ipv6-only
+      machineImage: ec2.MachineImage.latestAmazonLinux2023(),
+    });
+```
+
 ## Reference
 
 Enabling IPv6 on Resources and VPCs: https://github.com/aws/aws-cdk/issues/894
@@ -170,3 +188,5 @@ Guess it :)
 
 ## Updates
 Created on 2024-01-21
+
+Update on 2024-02-08: add bastion host part
