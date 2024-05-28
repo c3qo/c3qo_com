@@ -133,17 +133,8 @@ You also can find the IPv6 flag on Lambda console under "Configuration"->"VPC"->
 ```typescript
     const lambda = new Function(this, 'Handler', {
       ...
+      ipv6AllowedForDualStack: true, // from awscdk v2.129.0
     });
-
-    const func = lambda.node.defaultChild as CfnFunction;
-    func.vpcConfig = {
-      // enable the flag
-      ipv6AllowedForDualStack: true,
-      // copy with the existing config created in "new Function"
-      securityGroupIds: (func.vpcConfig as CfnFunction.VpcConfigProperty)
-        .securityGroupIds,
-      subnetIds: (func.vpcConfig as CfnFunction.VpcConfigProperty).subnetIds,
-    };
 ```
 
 #### Create RDS Instance
@@ -190,3 +181,5 @@ Guess it :)
 Created on 2024-01-21
 
 Update on 2024-02-08: add bastion host part
+
+Update on 2024-05-28: update `ipv6AllowedForDualStack` to lambda stack, based on awscdk latest release
