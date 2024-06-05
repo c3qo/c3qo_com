@@ -1,0 +1,206 @@
+---
+title: Customize the "Upgrader" for your own app updates in Flutter
+description: Simply customize "Upgrader" and build your own alert widget
+sidebar:
+    label: Flutter:Customize the "Upgrader" for app updates
+---
+
+## Background
+[Upgrader](https://pub.dev/packages/upgrader) is a popular package for alert message to user for app updates if a new version is published in AppStore/PlayStore for Flutter.
+It's so great to have a built-in Alert widget and Card widget, and also easy to use them following the guidance.
+
+## Why Customize it
+1. The bottom sheet alert looks better with the overall style of my app. Not aggressive as a dialog alert to occupy the "whole" screen.
+2. My app has three bundleIds in appstore connect for IAP testing(dev, beta and production).
+To test the Upgrader, changing the bundle id to production may break IAP and Firebase on production (seeing errors from Firebase in debug with production bundle id).
+3. The state of the UpgraderAlert will be rebuilt if the widget tree is rebuilt when wrap UpgraderAlert on the GoRouter builder.
+
+## Useful components in Upgrader
+the package Upgrader is well-structured (thanks the author). List the components we will use:
+* UpgradeAlert class: the alert widget, it's used to wrap the child widget and will show the "alert" on top of the child widget.
+* UpgradeAlertState class: the state of the alert widget, owns the detailed widgets.
+* Upgrader class: the core logic of check the version if trigger the alert or not.
+* UpgraderStore class: the abstract class for store version provider. It provides the latest app version information available in store.
+
+## How
+### Bottom Sheet Alert
+`UpgradeAlertState` can be extended and overridden with a customized alert widget, like dialog or bottom sheet.
+* To popup a dialog: overwrite the `alertDialog` method, Upgrader author offers an example [main_alert_theme](https://github.com/larryaasen/upgrader/blob/master/example/lib/main_alert_theme.dart).
+* To popup a bottom sheet: have to overwrite the `showTheDialog` method, this is the caller of above `alertDialog`. There is a similar example too [main_custom_alert](https://github.com/larryaasen/upgrader/blob/master/example/lib/main_custom_alert.dart) but not a bottomsheet.
+### Mockup version provider for test
+To test the updates without changing bundleId and app description stored, we can rewrite the `UpgraderStore` to provide a dummy versions for testing.
+### Avoid rebuilding
+The UpgradeAlert is placed just under the `MaterialApp` widget (following the guidance), almost at the root of the widget tree. If the Upgrader is running in Debug mode, you may notice the Upgrader's debug output when widget tree is rebuilt.
+The whole widget tree may be rebuilt multiple times (by designed in Flutter).
+To minimize the rebuilding cost in UpgradeAlert, we can wrap `UpgradeAlert` (or `UpgradeCard`) within a page and use the `upgrader.shouldDisplayUpgrade` to control the trigger.
+
+## Code
+
+The mock up class will provide the url, appStoreVersion, release note and minimal app version for testing.
+This will help your quick test without changing bundle id.
+```dart
+class MockUpgraderAppStore extends UpgraderStore {
+  MockUpgraderAppStore();
+
+  @override
+  Future<UpgraderVersionInfo> getVersionInfo(
+          {required UpgraderState state,
+          required Version installedVersion,
+          required String? country,
+          required String? language}) async =>
+      UpgraderVersionInfo(
+        appStoreListingURL:
+            'https://apps.apple.com/us/app/google-maps-transit-food/id585027354?uo=4',
+        appStoreVersion: Version.parse('1.1.2'),
+        installedVersion: Version.parse('0.0.9'), // this is not used by Upgrader, installed version is from app's pubspec.yaml
+        releaseNotes: 'test release notes',
+        isCriticalUpdate: null,
+        minAppVersion: Version.parse('1.1.1'),
+      );
+}
+
+```
+
+Initialize the `Upgrader` before the `MaterialApp`, inject the mockup data into the `Controller`.
+
+`upgrader.initialize()` query the store's server (AppStore and PlayStore) on production, this only calls once in the app's lifecycle.
+On non-production, no call to store's server, just use the mockup data.
+
+```dart
+class _Global {
+    late final Upgrader upgrader;
+
+void globalInit() async {
+    upgrader = global.isProduction
+        ? Upgrader()
+        : Upgrader(
+      durationUntilAlertAgain: const Duration(minutes: 5),
+      storeController: UpgraderStoreController(
+          oniOS: () => MockUpgraderAppStore()),
+      debugLogging: true,
+    );
+    await upgrader.initialize();
+  }
+}
+```
+
+Customize the `UpgradeAlert` with a BottomSheet.
+
+```dart
+class MyUpgradeAlert extends UpgradeAlert {
+  MyUpgradeAlert(
+      {super.key,
+      super.child,
+      super.navigatorKey,
+      super.showReleaseNotes = false})
+      : super(upgrader: global.upgrader);
+
+  @override
+  UpgradeAlertState createState() => MyUpgradeAlertState();
+}
+
+class MyUpgradeAlertState extends UpgradeAlertState {
+  @override
+  void showTheDialog({
+    Key? key,
+    required BuildContext context,
+    required String? title,
+    required String message,
+    required String? releaseNotes,
+    required bool barrierDismissible,
+    required UpgraderMessages messages,
+  }) {
+    final isBlocked = widget.upgrader.blocked();
+    final showIgnore = isBlocked ? false : widget.showIgnore;
+    final showLater = isBlocked ? false : widget.showLater;
+    final String? appStoreVersion = widget.upgrader.currentAppStoreVersion;
+    final String? installedVersion = widget.upgrader.currentInstalledVersion;
+
+    widget.upgrader.saveLastAlerted(); // don't forget this line, otherwise the 'Later' button function may not work well
+
+    final child = Theme(
+      data: ThemeData(
+        textButtonTheme: const TextButtonThemeData(
+          style: ButtonStyle(
+            // Change the color of the text buttons.
+            foregroundColor: MaterialStatePropertyAll(Colors.blue),
+          ),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: ListBody(
+          children: <Widget>[
+            Text(
+                'MyApp $appStoreVersion is available and is ready to update.'),
+            Text(
+                'You are using version $installedVersion. Would you like to update it now?'),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                if (showIgnore)
+                  TextButton(
+                    child: const Text('Ignore'),
+                    onPressed: () {
+                      onUserIgnored(context, true);
+                    },
+                  ),
+                wideSpacerLarge,
+                if (showLater)
+                  TextButton(
+                    child: const Text('Later'),
+                    onPressed: () {
+                      onUserLater(context, true);
+                    },
+                  ),
+                wideSpacerLarge,
+                TextButton(
+                  child: const Text('Update Now'),
+                  onPressed: () {
+                    onUserUpdated(context, !widget.upgrader.blocked());
+                  },
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+    await showModalBottomSheet(context: context, child: child, isDismissible: false);
+  }
+}
+```
+
+We have initialized the `upgrader` before, so use it to gate the trigger.
+
+It's possible to have multiple calls to `shouldDisplayUpgrade` if widget tree is rebuilt.
+No worries, this method only use the on-hand data (cached) to check, no calls to store's server or no widget updates.
+
+```dart
+
+class HomePage extends StatelessWidget {
+  const HomePage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final child = Scaffold(
+          appBar: AppBar(title: const Text('Upgrader Example')),
+          body: const Center(child: Text('Checking...')),
+        );
+    if (global.upgrader.shouldDisplayUpgrade()) {
+      return MyUpgradeAlert(
+          navigatorKey: global.navigatorKey, // or get navigatorKey from go router
+          child: scaffold);
+    }
+
+    return scaffold;
+  }
+}
+```
+## Other tricks
+During my testing, noticed the `hot reload` may not pick the mocked up version changes sometimes, have to restart the app.
+
+And also, if the 'Update Now' button doesn't work (click but nothing happened), check if the alert (dialog or bottomsheet) is double triggered, the second trigger may have an empty url.
+
+## Updates
+Created on 2024-06-04
