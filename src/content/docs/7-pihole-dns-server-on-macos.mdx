@@ -1,0 +1,143 @@
+---
+title: Setup Pihole as home's DNS server on MacOS (M4 Mac Mini)
+description: Setup Pihole on MacOS with an individual LAN ip address 
+sidebar:
+    label: Setup Pihole as home's DNS server on MacOS (M4 Mac Mini)
+---
+import { Image } from "astro:assets";
+import img71 from '../../assets/7/7-1.jpg';
+
+## Background
+The M4 Mac Mini is a new released product from Apple. The CPU is so powerful and the effeiceny is incredible. It's a perfect dev machine to reduce the load for my current MBP, the last generation of Intel CPU. And meanwhile, it can replace my current tiny home server, an old Thinkpad T61 with Debian. It had been running for a few years and very stable. Pihole is one of the severice should be migrated.
+
+## What's the goals
+1. Only use Pihole as DNS server, not the DHCP server.
+2. Pihole shoud show the devices' local LAN ip.
+3. Pihole is managed by docker container.
+
+## Tl;dr
+Don't waste time to setup Pihole docker on MacOS, setup a Linux virtual machine on MacOS and run Pihole docker within Linux.
+
+### Why
+Docker runtime doesn't support `macvlan` network config on MacOS. [issue](https://github.com/docker/for-mac/issues/3926). Both of the Docker Desktop on Mac and colima won't work. VirtualBox can use the `Bridged Adapter` network on MacOS so the host machine will be assigned a dedicated LAN ip address and Pihole can use it on port 53.
+
+`Bridge Network` in Docker is more like the `NAT Network`, Docker's equivalent of VMWare or VirtualBox bridged network is `macvlan`.
+
+## Failed Setup 
+
+### Colima
+
+Colima is a light weight container runtime and is running for AWS SAM and Postgres on my laptop. I set it with Portainer CE on Mac Mini.
+
+We can use two network modes for Pihole:
+
+1. host mode
+
+Pihole would use the Mac Mini's network, so the ip address is same to Pihole and Mac Mini.
+
+```yaml
+  services:
+  pihole:
+    container_name: pihole
+    image: pihole/pihole:latest
+    network_mode: "host"
+    environment:
+      TZ: 'UTC'
+    volumes:
+      - './etc-pihole:/etc/pihole'
+      - './etc-dnsmasq.d:/etc/dnsmasq.d'
+```
+
+However, `host` mode is not supported on MacOS. Even the Pihole can start up succesffuly, can't ping Pihole from other devices. 
+
+Another issue you may encounter, the port `53` is occupied by `mDnsResponder` process invoked by Apple. `53` is used for DNS query, so Pihole can't get start up. [issue](https://github.com/docker/for-mac/issues/7008)
+
+2. Port Forwarding Mode
+
+Pihole uses the colima's network, it means there is a separated network for Pihole and colima. 
+
+```yaml
+  services:
+  pihole:
+    container_name: pihole
+    image: pihole/pihole:latest
+    ports:
+      - "53:53/tcp"
+      - "53:53/udp"
+      - "80:80/tcp"
+    environment:
+      TZ: 'UTC'
+    volumes:
+      - './etc-pihole:/etc/pihole'
+      - './etc-dnsmasq.d:/etc/dnsmasq.d'
+```
+
+Two possible issues. Pihole may fail with `53` is not assigned in start up. This issue can be solved with [Pihole Docker guide](https://github.com/pi-hole/docker-pi-hole/?tab=readme-ov-file#installing-on-ubuntu-or-fedora). I spent a lot of time on this. Colima's VM is Ubuntu.
+
+Now Pihole starts up well, but it's running in a different network and the devices in local LAN can't ping it. It can only be accessed from Mac Mini using ip `192.168.65.x`. Use `colima ssh` to login runtime, `ip a` will show the network, Colima has two networks, one is `192.168.65.1/24` and bind with Mac Mini, another one is `172.xx.0.0/16` and bind with Pihole.
+
+### Docker Desktop
+
+the `host` network mode is a [beta feature](https://docs.docker.com/engine/network/tutorials/host/#prerequisites) in Docker Desktop. However, like one of the above issues, the port `53` is occupied by `mDnsResponder` process if Docker Destop running. Pihole doesn't work.
+
+Also tried `macvlan` network mode, no luck. [issue](https://github.com/docker/for-mac/issues/3926)
+
+## Succeeded Setup
+
+I ended up setting docker in a Linux virtual machine and running Pihole within docker. It's VirtualBox + Ubuntu Server + Docker + Pihole.
+
+#### Network setting for VM in VirtualBox
+
+<Image src={img71} alt="7-1 snapshot"/>
+
+Have to follow [Pihole Docker guide](https://github.com/pi-hole/docker-pi-hole/?tab=readme-ov-file#installing-on-ubuntu-or-fedora) to release the port `53` in Ubuntu Server, also need a static local LAN ip address assigned by DHCP server (the router device).
+
+#### Pihole compose file
+Pihole uses the same network (`host` mode) with the VM (Ubuntu Server). `INTERFACE` tells Pihole the network interface assigned the static address. When use above `Bridged Adapter`, VirtualBox creates a network interface for Ubuntu Server and the network interface will be assigned this static ip address. 
+
+```yaml
+services:
+  pihole:
+    container_name: pihole
+    image: pihole/pihole:latest
+    network_mode: "host"
+    environment:
+      TZ: 'America/Los_Angeles'
+      WEBPASSWORD: 'its password'
+      IPv6: true
+      INTERFACE: 'enp0s8'
+    volumes:
+      - './etc-pihole:/etc/pihole:rw'
+      - './etc-dnsmasq.d:/etc/dnsmasq.d:rw'
+    restart: unless-stopped
+```
+
+#### VirtualBox headless and auto start up
+It's possible to setup VirtualBox running as headless and add in MacOS's login items if you prefer to no manual start up on VM. Remeber, you also need to setup a user to login automatically if Mac Mini gets reboot by any cases.
+
+Create below `plist` file in `~/Library/LaunchAgents`, for example, the name is `org.virtualbox.launch.UbuntuOnMac.plist`
+`UbuntuOnMac` is the VM's name created in VirtualBox. using CLI `VBoxManage list vms` can list all VM names.
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>org.virtualbox.launch.UbuntuOnMac</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/Applications/VirtualBox.app/Contents/MacOS/VBoxManage</string>
+		<string>startvm</string>
+		<string>UbuntuOnMac</string>
+		<string>--type</string>
+		<string>headless</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+</dict>
+</plist>
+```
+
+## Updates
+Created on 2024-11-25
